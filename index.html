@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>AIRDRAW — Gesture-Controlled Studio</title>
+
+<!-- ============================================================
+     FONTS
+     ============================================================ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- ============================================================
+     MEDIAPIPE HANDS — hand landmark detection engine
+     ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="dark">
+<div class="app">
+
+  <!-- ============================================================
+       LOADING VEIL
+       ============================================================ -->
+  <div class="veil" id="veil">
+    <div class="spinner"></div>
+    <p id="veilMsg">INITIALIZING HAND TRACKING ENGINE…</p>
+  </div>
+
+  <!-- ============================================================
+       STAGE — webcam + overlay + draw canvas
+       ============================================================ -->
+  <div class="stage">
+    <div class="stage-inner" id="stageInner">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="overlayCanvas" class="layer"></canvas>
+      <canvas id="drawCanvas" class="layer"></canvas>
+
+      <div class="cam-off" id="camOff">
+        <h2>Camera is off</h2>
+        <p>Turn on your webcam to draw in mid-air with hand gestures, or draw directly on the canvas with your mouse or touchscreen.</p>
+        <button id="camOffEnable">Enable Camera</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       TOP HUD
+       ============================================================ -->
+  <div class="hud-top">
+    <div class="glass brand">
+      <div class="brand-mark">AD</div>
+      <div class="brand-text">AIRDRAW<small>GESTURE STUDIO — v1.0</small></div>
+    </div>
+
+    <div class="glass stat-strip">
+      <div class="stat"><span class="k">FPS</span><span class="v" id="statFps"><span class="dot live"></span>--</span></div>
+      <div class="stat"><span class="k">Hands</span><span class="v" id="statHands">0</span></div>
+      <div class="stat"><span class="k">Confidence</span><span class="v"><div class="conf-meter"><i id="confBar"></i></div></span></div>
+      <div class="stat"><span class="k">Brush</span><span class="v" id="statBrush">Pencil</span></div>
+    </div>
+
+    <div style="display:flex; gap:8px;">
+      <button class="icon-btn" id="themeToggle" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54c-.44-.06-.9-.1-1.36-.1z"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsToggle" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GESTURE READOUT
+       ============================================================ -->
+  <div class="glass gesture-readout">
+    <div class="gesture-icon" id="gestureIcon">✋</div>
+    <div class="gesture-copy">
+      <span class="name" id="gestureName">No hand detected</span>
+      <span class="hint" id="gestureHint">Show your hand to the camera</span>
+    </div>
+    <div class="hold-ring" id="holdRing" style="display:none;">
+      <svg width="22" height="22"><circle class="bg" cx="11" cy="11" r="9"/><circle class="fg" id="holdRingFg" cx="11" cy="11" r="9" stroke-dasharray="56.5" stroke-dashoffset="56.5"/></svg>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       LEFT RAIL — brush picker
+       ============================================================ -->
+  <div class="glass rail-left" id="brushRail"></div>
+
+  <!-- ============================================================
+       RIGHT RAIL — toolbar
+       ============================================================ -->
+  <div class="glass rail-right">
+    <button class="icon-btn" id="btnUndo" title="Undo (Ctrl+Z)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 7"/></svg>
+    </button>
+    <button class="icon-btn" id="btnRedo" title="Redo (Ctrl+Y)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 7"/></svg>
+    </button>
+    <div class="divider-v" style="width:100%;height:1px;margin:2px 0;"></div>
+    <button class="icon-btn" id="btnClear" title="Clear canvas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+    </button>
+    <button class="icon-btn" id="btnSave" title="Save PNG (Ctrl+S)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+    </button>
+    <div class="divider-v" style="width:100%;height:1px;margin:2px 0;"></div>
+    <button class="icon-btn" id="btnFullscreen" title="Fullscreen (F)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+    </button>
+    <button class="icon-btn active" id="btnCamera" title="Toggle camera">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+    </button>
+    <button class="icon-btn active" id="btnMirror" title="Toggle mirror (M)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M8 7l-4 5 4 5"/><path d="M16 7l4 5-4 5"/></svg>
+    </button>
+  </div>
+
+  <!-- ============================================================
+       BOTTOM BAR — size / color / pause
+       ============================================================ -->
+  <div class="glass bottom-bar">
+    <div class="size-control">
+      <div class="size-preview"><i id="sizePreviewDot" style="width:8px;height:8px;"></i></div>
+      <input type="range" class="slim" id="sizeSlider" min="1" max="80" value="10" title="Brush size">
+      <span class="hint" style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); width:26px;" id="sizeVal">10</span>
+    </div>
+    <div class="divider-v"></div>
+    <div class="opacity-row" style="gap:8px;">
+      <label style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);" title="Brush opacity">OPAC</label>
+      <input type="range" class="slim" id="opacitySlider" min="5" max="100" value="100" title="Brush opacity">
+    </div>
+    <div class="divider-v"></div>
+    <div class="color-swatch" id="colorSwatch" title="Open color palette"></div>
+    <div class="divider-v"></div>
+    <button class="icon-btn" id="btnPause" title="Pause tracking (Space)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+    </button>
+  </div>
+
+  <!-- ============================================================
+       LEGEND & TIPS
+       ============================================================ -->
+  <button class="glass icon-btn legend-toggle" id="legendToggle" title="Gesture guide">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg>
+  </button>
+  <button class="glass icon-btn" id="tipsToggle" title="Tips for better tracking" style="position:absolute; left:64px; bottom:18px; z-index:22; width:38px; height:38px;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1v.2h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>
+  </button>
+  <div class="glass legend" id="tipsPanel" style="left:112px;">
+    <div class="section-label">Tips For Better Tracking</div>
+    <div class="legend-item">💡 <b>Lighting</b> — face a light source; backlighting confuses detection.</div>
+    <div class="legend-item">📏 <b>Distance</b> — keep your hand roughly 30–60 cm from the camera.</div>
+    <div class="legend-item">🖐️ <b>Framing</b> — keep your whole hand inside the video frame.</div>
+    <div class="legend-item">☝️ <b>Draw</b> — straighten your index finger fully, curl the rest.</div>
+    <div class="legend-item">🤏 <b>Resize</b> — curl your index too, then pinch thumb + index.</div>
+    <div class="legend-item">🎯 <b>Jittery lines?</b> — raise Stroke Smoothing in Settings.</div>
+    <div class="legend-item">🐢 <b>Gestures not registering?</b> — lower confidence sliders in Settings.</div>
+    <div class="legend-item">⌨️ <b>Shortcuts</b> — Ctrl+Z undo · Ctrl+S save · Space pause · F fullscreen · M mirror.</div>
+  </div>
+  <div class="glass legend" id="legendPanel">
+    <div class="section-label">Gesture Guide</div>
+    <div class="legend-item"><span class="ic">☝️</span><b>Draw</b> — index finger only</div>
+    <div class="legend-item"><span class="ic">✌️</span><b>Move</b> — index + middle</div>
+    <div class="legend-item"><span class="ic">✊</span><b>Eraser</b> — closed fist</div>
+    <div class="legend-item"><span class="ic">🖐️</span><b>Clear</b> — open palm, hold 2s</div>
+    <div class="legend-item"><span class="ic">✋</span><b>Pause</b> — hold palm 3s</div>
+    <div class="legend-item"><span class="ic">👍</span><b>Undo</b> — thumbs up</div>
+    <div class="legend-item"><span class="ic">👎</span><b>Redo</b> — thumbs down</div>
+    <div class="legend-item"><span class="ic">🤏</span><b>Brush size</b> — curl index, pinch thumb/index</div>
+    <div class="legend-item"><span class="ic">👌</span><b>Color palette</b> — OK sign</div>
+    <div class="legend-item"><span class="ic">🤟</span><b>Save PNG</b> — rock sign</div>
+  </div>
+
+  <!-- ============================================================
+       COLOR PANEL
+       ============================================================ -->
+  <div class="glass color-panel" id="colorPanel">
+    <div class="panel-title">Color<button id="closeColorPanel">✕</button></div>
+    <div class="hsv-wheel-wrap"><canvas id="hsvWheel" width="200" height="200"></canvas></div>
+    <div class="opacity-row">
+      <label>OPACITY</label>
+      <input type="range" class="slim" id="opacitySlider2" min="5" max="100" value="100" style="flex:1;width:auto;">
+    </div>
+    <div class="hex-row">
+      <input type="text" id="hexInput" value="#4fe8ff" maxlength="7">
+    </div>
+    <div class="rgb-row">
+      <div class="rgb-field"><label>R</label><input type="number" id="rInput" min="0" max="255" value="79"></div>
+      <div class="rgb-field"><label>G</label><input type="number" id="gInput" min="0" max="255" value="232"></div>
+      <div class="rgb-field"><label>B</label><input type="number" id="bInput" min="0" max="255" value="255"></div>
+    </div>
+    <div>
+      <div class="section-label">Presets</div>
+      <div class="preset-grid" id="presetGrid"></div>
+    </div>
+    <div>
+      <div class="section-label">Recent</div>
+      <div class="recent-row" id="recentRow"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SETTINGS PANEL
+       ============================================================ -->
+  <div class="glass settings-panel" id="settingsPanel">
+    <div class="panel-title">Settings<button id="closeSettingsPanel">✕</button></div>
+
+    <div class="setting-group">
+      <div class="section-label">Camera</div>
+      <div class="setting-row"><label>Resolution</label>
+        <select id="resSelect">
+          <option value="640x480">640 × 480</option>
+          <option value="1280x720" selected>1280 × 720</option>
+          <option value="1920x1080">1920 × 1080</option>
+        </select>
+      </div>
+      <div class="setting-row"><label>Frame rate</label>
+        <select id="fpsSelect">
+          <option value="24">24 fps</option>
+          <option value="30" selected>30 fps</option>
+          <option value="60">60 fps</option>
+        </select>
+      </div>
+      <div class="setting-row"><label>Mirror mode</label><button class="toggle on" id="mirrorToggle"></button></div>
+    </div>
+
+    <hr class="sep">
+    <div class="setting-group">
+      <div class="section-label">Hand Tracking</div>
+      <div class="setting-row"><label>Detection confidence</label></div>
+      <div class="range-mini"><input type="range" id="detConfSlider" min="0.3" max="0.9" step="0.05" value="0.7"><span class="val" id="detConfVal">0.70</span></div>
+      <div class="setting-row"><label>Tracking confidence</label></div>
+      <div class="range-mini"><input type="range" id="trackConfSlider" min="0.3" max="0.9" step="0.05" value="0.6"><span class="val" id="trackConfVal">0.60</span></div>
+      <div class="setting-row"><label>Max hands</label>
+        <select id="maxHandsSelect">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+        </select>
+      </div>
+    </div>
+
+    <hr class="sep">
+    <div class="setting-group">
+      <div class="section-label">Gestures & Drawing</div>
+      <div class="setting-row"><label>Show cursor</label><button class="toggle on" id="cursorToggle"></button></div>
+      <div class="setting-row"><label>Gesture sensitivity</label></div>
+      <div class="range-mini"><input type="range" id="gestSensSlider" min="0.5" max="1.5" step="0.05" value="1"><span class="val" id="gestSensVal">1.00</span></div>
+      <div class="setting-row"><label>Stroke smoothing</label></div>
+      <div class="range-mini"><input type="range" id="smoothSlider" min="0" max="0.9" step="0.05" value="0.4"><span class="val" id="smoothVal">0.40</span></div>
+      <div class="setting-row"><label>Brush hardness</label></div>
+      <div class="range-mini"><input type="range" id="hardnessSlider" min="0" max="100" step="1" value="70"><span class="val" id="hardnessVal">70</span></div>
+      <div class="setting-row"><label>Flow</label></div>
+      <div class="range-mini"><input type="range" id="flowSlider" min="10" max="100" step="1" value="100"><span class="val" id="flowVal">100</span></div>
+    </div>
+
+    <hr class="sep">
+    <div class="setting-group">
+      <div class="section-label">System</div>
+      <div class="setting-row"><label>Auto-save (local)</label><button class="toggle on" id="autosaveToggle"></button></div>
+      <div class="setting-row"><label>Export format</label>
+        <select id="exportFormatSelect">
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       TOASTS
+       ============================================================ -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <!-- hidden file-ish helper -->
+  <a id="downloadLink" style="display:none;"></a>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
